@@ -29,7 +29,7 @@ int nbrClients = 0; //variable globale indiquant le nombre de client en cours
 jmp_buf env_buffer;
 
 
-void traitementSignal(int idSignal) { 
+void traitementSignal(int idSignal) {
     if (idSignal != SIGUSR1) {
         perror("id signal: ");
         exit(EXIT_FAILURE);
@@ -177,16 +177,16 @@ int main() {
         if (nbrClients > MAXCLIENT) {
             printf("[proxy] le nombre maximal de clients a ete atteint : %d\n", nbrClients);
         } else {
-            if (descSockCOM == -1) {
-                perror("Erreur accept\n");
-                exit(6);
-            }
-            nbrClients++;
+						if (descSockCOM == -1) {
+					  perror("Erreur accept\n");
+							exit(6);
+						}
+						nbrClients++;
 
-            pid_t idProc;
-            idProc = fork(); //on forke chaque demande de connection dans un nv processus
-            switch (idProc) {
-            case -1:
+						pid_t idProc;
+						idProc = fork(); //on forke chaque demande de connection dans un nv processus
+						switch (idProc) {
+						case -1:
                 printf("[proxy] Erreur lors de la creation du processus fils\n");
                 exit(EXIT_FAILURE);
             case 0: //on passe le relai au proc fils
