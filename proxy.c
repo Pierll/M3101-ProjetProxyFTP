@@ -1,132 +1,126 @@
-#include  <stdio.h>
-#include  <stdlib.h>
-#include  <sys/socket.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <wait.h>
-#include  <netdb.h>
-#include  <string.h>
-#include  <unistd.h>
+#include <netdb.h>
+#include <string.h>
+#include <unistd.h>
 #include <sys/ioctl.h>
 #include <poll.h>
-
-#include <sys/types.h>
-#include <sys/ipc.h>
-#include <sys/msg.h>
-
-#include <setjmp.h>
 #include <signal.h>
+#include <regex.h>
 #include "simpleSocketAPI.h"
 
-#define SERVADDR "127.0.0.1"        // Définition de l'adresse IP d'écoute
-#define SERVPORT "0"                // Définition du port d'écoute, si 0 port choisi dynamiquement
-#define LISTENLEN 1                 // Taille de la file des demandes de connexion
 #define MAXBUFFERLEN 1024           // Taille du tampon pour les échanges de données
-#define MAXHOSTLEN 64               // Taille d'un nom de machine
-#define MAXPORTLEN 64               // Taille d'un numéro de port
 #define MAXCLIENT 16 				// Nombre maximum de clients FTP
 #define TIMEOUT 5000 				//valeur du temps maximal que peut mettre un client en repondre (en ms)
 
 int nbrClients = 0; //variable globale indiquant le nombre de client en cours
-jmp_buf env_buffer;
 
+int regCompare(char* chaine, char *pattern) { //comparer 2 chaines par regex
+    regex_t reg;
+    int r;
 
-void traitementSignal(int idSignal) { 
+    if (regcomp(&reg, pattern, REG_NOSUB | REG_EXTENDED) != 0) {
+        fprintf(stderr, "La compilation de regex a echoue");
+        exit(EXIT_FAILURE);
+    }
+
+    r = regexec(&reg, chaine, 0, NULL, 0);
+
+    switch (r) {
+    case 0: //la chaine correspond au motif
+        return 1;
+    case REG_NOMATCH: //ne correspond pas au motif
+        return 0;
+    default: //erreur
+        fprintf(stderr, "Erreur de comparaison regex");
+        exit(EXIT_FAILURE);
+    }
+
+}
+
+int chaineCommencePar(char* chaine, char* comparaison) {
+    if (strlen(chaine) < strlen(comparaison))
+        return 0;
+    for (unsigned int i = 0; i < strlen(comparaison); i++) {
+        if (chaine[i] != comparaison[i])
+            return 0;
+    }
+    return 1;
+}
+
+void traitementSignal(int idSignal) {
     if (idSignal != SIGUSR1) {
         perror("id signal: ");
         exit(EXIT_FAILURE);
     }
-    puts("Fils mort");
     nbrClients--;
 
 }
 
-int gererSocket(int mode, socklen_t* len) { //si mode = -1 alors creation d'un nv socket, sinon le mode est considere comme le num du socket et on le ferme
-    if (mode == -1) {
-        int ecode;                       // Code retour des fonctions
-        char serverAddr[MAXHOSTLEN];     // Adresse du serveur
-        char serverPort[MAXPORTLEN];     // Port du server
-        int descSockRDV;                 // Descripteur de socket de rendez-vous#
-        struct addrinfo hints;           // Contrôle la fonction getaddrinfo
-        struct addrinfo *res;            // Contient le résultat de la fonction getaddrinfo
-        struct sockaddr_storage myinfo;  // Informations sur la connexion de RDV
-        // Initialisation de la socket de RDV IPv4/TCP
-        descSockRDV = socket(AF_INET, SOCK_STREAM, 0);
-        if (descSockRDV == -1) {
-            perror("Erreur création socket RDV\n");
-            exit(2);
-        }
-        // Publication de la socket au niveau du système
-        // Assignation d'une adresse IP et un numéro de port
-        // Mise à zéro de hints
-        memset(&hints, 0, sizeof(hints));
-        // Initialisation de hints
-        hints.ai_flags = AI_PASSIVE;      // mode serveur, nous allons utiliser la fonction bind
-        hints.ai_socktype = SOCK_STREAM;  // TCP
-        hints.ai_family = AF_INET;        // seules les adresses IPv4 seront présentées par
-        // la fonction getaddrinfo
-
-        // Récupération des informations du serveur
-        ecode = getaddrinfo(SERVADDR, SERVPORT, &hints, &res);
-        if (ecode) {
-            fprintf(stderr,"getaddrinfo: %s\n", gai_strerror(ecode));
-            exit(EXIT_FAILURE);
-        }
-        // Publication de la socket
-        ecode = bind(descSockRDV, res->ai_addr, res->ai_addrlen);
-        if (ecode == -1) {
-            perror("Erreur liaison de la socket de RDV");
-            exit(3);
-        }
-        // Nous n'avons plus besoin de cette liste chainée addrinfo
-        freeaddrinfo(res);
-
-        // Récupération du nom de la machine et du numéro de port pour affichage à l'écran
-        *len=sizeof(struct sockaddr_storage);
-        ecode=getsockname(descSockRDV, (struct sockaddr *) &myinfo, len);
-        if (ecode == -1)
-        {
-            perror("SERVEUR: getsockname");
-            exit(4);
-        }
-        ecode = getnameinfo((struct sockaddr*)&myinfo, sizeof(myinfo), serverAddr,MAXHOSTLEN,
-                            serverPort, MAXPORTLEN, NI_NUMERICHOST | NI_NUMERICSERV);
-        if (ecode != 0) {
-            fprintf(stderr, "error in getnameinfo: %s\n", gai_strerror(ecode));
-            exit(4);
-        }
-        printf("L'adresse d'ecoute est: %s\n", serverAddr);
-        printf("Le port d'ecoute est: %s\n", serverPort);
-
-        // Definition de la taille du tampon contenant les demandes de connexion
-        ecode = listen(descSockRDV, LISTENLEN);
-        if (ecode == -1) {
-            perror("Erreur initialisation buffer d'écoute");
-            exit(5);
-        }
-        *len = sizeof(struct sockaddr_storage);
-        return descSockRDV;
-    } else {
-        close(mode);
-    }
-    return 0;
-
-}
-
-int ecouterClient(int descSockCOM, struct pollfd* fd) {
+int traiterSocket(int desc, char buffer[MAXBUFFERLEN]) {
     char bufferC[MAXBUFFERLEN] = {};
-    ssize_t rc;
-    while ( fd->revents & POLLIN ) {//revents = l'event retourne
-        rc = read(descSockCOM, bufferC, sizeof(bufferC));
 
-        if ( rc <= 0 ) { //communication interrompu
+	struct pollfd fd = {
+        .fd = desc,
+        .events = POLLIN
+    };
+	int retourPoll = poll(&fd, 1, TIMEOUT); // ecoute pendant 5 secondes
+    if (retourPoll == 0) {
+	   	puts("TIMEOUT...");
+	   	return 0;
+	 }
+    
+    int len = 0;
+    ioctl(desc, FIONREAD, &len);
+    if (len > 0) {
+      len = read(desc, bufferC, len);
+        if ( len <= 0 ) { //communication interrompu
             return -1;
         }
-
-        poll(fd, 1, 0); //sinon le programme loop a l'infinie (?)
     }
-    printf("[client %d] Lis %d bytes: %s\n", descSockCOM, (int)rc, bufferC);
+    if (len <= 0) { //communication interrompu
+    	puts("DECONNEXION DU CLIENT");
+    	return -1;
+    }
+    memset(buffer, 0, sizeof(bufferC)); //nettoie le buffer sinon residus de memoire
+	strncpy(buffer, bufferC, strlen(bufferC));
+	return 1;    
+}
 
-    write(descSockCOM, bufferC, sizeof(bufferC));
-    memset(bufferC, 0, sizeof(bufferC)); //nettoie le buffer sinon residus de memoire
+int ecouterClient(int descSockCOM, char* commande) {
+    
+    if (chaineCommencePar(commande, "AUTH")) {
+        write(descSockCOM, "534\n", sizeof("534\n")); //ne supporte pas l'extension de securite (RFC 2228)
+    }
+
+    if(chaineCommencePar(commande, "USER ")) {
+        if (regCompare(commande, "..*@..*"))  {//verifie si la chaine est sous la forme nomlogin@nomserveur
+            int descSockSERV;
+
+            /*DeBUG*/
+            strtok(commande, " ");
+            int result;
+            char* nomLogin = strtok(NULL, "@");
+            char* nomServeur = strtok(NULL, "@");
+            nomServeur[strlen(nomServeur)-2] = '\0'; //retire le saut de ligne
+
+            if ((result = connect2Server(nomServeur, "21", &descSockSERV)) == -1) {
+                write(descSockCOM, "530 Connexion impossible\n", sizeof("530 Connexion impossible\n")); //code "login failed"
+                return 1;
+            }
+
+            printf("Desc : %d\n", descSockSERV);
+			char bufferC[MAXBUFFERLEN] = {};
+			traiterSocket(descSockSERV, bufferC);
+			printf("Reponse serveur : %s\n", bufferC);
+            /* FIN CODE TEMPORAIRE */
+        } else {
+            write(descSockCOM, "530\n", sizeof("530\n")); //code "login failed"
+            //write(descSockCOM, "221\n", sizeof("221\n")); //code "GOODBYE"
+        }
+    }
+
     return 0;
 }
 
@@ -135,30 +129,26 @@ void traiterFils(int descSockCOM, int pidPere) {
     int stop = 0;
     char buffer[MAXBUFFERLEN] = {};
 
-    char* strtest = "220 BLABLABLA\n";
-    strncpy(buffer, strtest, MAXBUFFERLEN);
-    struct pollfd fd = {
-        .fd = descSockCOM,
-        .events = POLLIN
-    };
-
-    while (!stop) {
-        int retourPoll = poll(&fd, 1, TIMEOUT); // attend 5 secondes
+    char* strBonjour = "220 BIENVENUE SUR LE PROXY FTP\n";
+    strncpy(buffer, strBonjour, MAXBUFFERLEN);
+    write(descSockCOM, buffer, sizeof(buffer)); //envoie le bonjour 220
+	
+    while (!stop) { //boucle principale
+    	int retourPoll = traiterSocket(descSockCOM, buffer);
+    	printf("je lis %s\n", buffer);
         if (retourPoll == 0) { //si le client ne repond rien durant le laps de temps
             printf("[proxy] timeout client %d\n", descSockCOM);
+        } else if (retourPoll == -1) {
+        	 printf("[proxy] communication avec le client %d interrompue\n", descSockCOM);
+             if (kill(pidPere, SIGUSR1) == -1) { //envoie le signal SIGUSR 1 au pere pour signaler sa fin
+                 perror("kill");
+                 exit(EXIT_FAILURE);
+             }
+             return;
         } else {
-            if (ecouterClient(descSockCOM, &fd) == -1) {
-                printf("[proxy] communication avec le client %d interrompue\n", descSockCOM);
-                if (kill(pidPere, SIGUSR1) == -1) { //envoie le signal SIGUSR 1 au pere pour signaler sa fin
-                    perror("kill");
-                    exit(EXIT_FAILURE);
-                }
-                return;
-            }
+              ecouterClient(descSockCOM, buffer); 
         }
     }
-
-
 }
 
 int main() {
@@ -166,15 +156,15 @@ int main() {
     socklen_t len;                   // Variable utilisée pour stocker les longueurs des structures de socket#
     struct sockaddr_storage from;    // Informations sur le client connecté
     int descSockRDV = gererSocket(-1, &len); //cree le socket du proxy
-    int pidPere =getpid(); //pid du pere
+    int pidPere = getpid(); //pid du pere
 
-    signal(SIGUSR1, traitementSignal);
+    signal(SIGUSR1, traitementSignal); //pour recevoir le signal SIGUSR1 du fils
 
     /*Programme principal*/
     while (1 == 1) {
         printf("Nombre clients : %d\n", nbrClients);
         descSockCOM = accept(descSockRDV, (struct sockaddr *) &from, &len); //attend la connexion
-        if (nbrClients > MAXCLIENT) {
+        if (nbrClients >= MAXCLIENT) {
             printf("[proxy] le nombre maximal de clients a ete atteint : %d\n", nbrClients);
         } else {
             if (descSockCOM == -1) {
