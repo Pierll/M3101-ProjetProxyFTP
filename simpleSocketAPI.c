@@ -8,12 +8,11 @@
 #include "simpleSocketAPI.h"
 
 #define SERVADDR "127.0.0.1"        // Définition de l'adresse IP d'écoute
-#define SERVPORT "0"                // Définition du port d'écoute, si 0 port choisi dynamiquement
 #define LISTENLEN 1                 // Taille de la file des demandes de connexion
 #define MAXHOSTLEN 64               // Taille d'un nom de machine
 #define MAXPORTLEN 64               // Taille d'un numéro de port
 
-int connect2Server(const char *serverName, const char *port, int *descSock){
+int connect2Server(const char *serverName, int port, int *descSock){
 
     int ecode;                     // Retour des fonctions
 	struct addrinfo *res,*resPtr;  // Résultat de la fonction getaddrinfo
@@ -27,14 +26,18 @@ int connect2Server(const char *serverName, const char *port, int *descSock){
 				                      // la fonction getaddrinfo
 
 	//Récupération des informations sur le serveur
-	
-	ecode = getaddrinfo(serverName,port,&hints,&res);
+	/* converti le port en chaine */
+    int taille = snprintf(NULL, 0, "%d", port);
+    char str[taille+1];
+    snprintf(str, taille+1, "%d", port);
+        
+	ecode = getaddrinfo(serverName,str,&hints,&res);
 	if (ecode) {
 		printf("erreur sur NOM: %s\n", serverName);
 		fprintf(stderr,"getaddrinfo: %s\n", gai_strerror(ecode));
 		return -1;
 	} else {
-		printf("Succes de la connexion sur %s\n", serverName);
+		printf("Succes de la connexion sur %s sur le port %d (%s)\n", serverName, port, str);
 	}
 
 	resPtr = res;
@@ -71,18 +74,19 @@ int connect2Server(const char *serverName, const char *port, int *descSock){
     return 0;
 }
 
-int gererSocket(int mode, socklen_t* len) { //si mode = -1 alors creation d'un nv socket, sinon le mode est considere comme le num du socket et on le ferme
+int gererSocket(int mode, socklen_t* len, int port) { //si mode = -1 alors creation d'un nv socket, sinon le mode est considere comme le num du socket et on le ferme
     if (mode == -1) {
         int ecode;                       // Code retour des fonctions
         char serverAddr[MAXHOSTLEN];     // Adresse du serveur
         char serverPort[MAXPORTLEN];     // Port du server
-        int descSockRDV;                 // Descripteur de socket de rendez-vous#
+        int sock;                 // Descripteur de socket de rendez-vous#
         struct addrinfo hints;           // Contrôle la fonction getaddrinfo
         struct addrinfo *res;            // Contient le résultat de la fonction getaddrinfo
         struct sockaddr_storage myinfo;  // Informations sur la connexion de RDV
         // Initialisation de la socket de RDV IPv4/TCP
-        descSockRDV = socket(AF_INET, SOCK_STREAM, 0);
-        if (descSockRDV == -1) {
+        sock = socket(AF_INET, SOCK_STREAM, 0);
+        printf("[debug] socket : %d\n", sock);
+        if (sock == -1) {
             perror("Erreur création socket RDV\n");
             exit(2);
         }
@@ -97,13 +101,19 @@ int gererSocket(int mode, socklen_t* len) { //si mode = -1 alors creation d'un n
         // la fonction getaddrinfo
 
         // Récupération des informations du serveur
-        ecode = getaddrinfo(SERVADDR, SERVPORT, &hints, &res); 
+
+		/* converti le port en chaine */
+        int taille = snprintf(NULL, 0, "%d", port);
+        char str[taille+1];
+        snprintf(str, taille+1, "%d", port);
+        
+        ecode = getaddrinfo(SERVADDR, str, &hints, &res); 
         if (ecode) {
             fprintf(stderr,"getaddrinfo: %s\n", gai_strerror(ecode));
             exit(EXIT_FAILURE);
         }
         // Publication de la socket
-        ecode = bind(descSockRDV, res->ai_addr, res->ai_addrlen);
+        ecode = bind(sock, res->ai_addr, res->ai_addrlen);
         if (ecode == -1) {
             perror("Erreur liaison de la socket de RDV");
             exit(3);
@@ -113,7 +123,7 @@ int gererSocket(int mode, socklen_t* len) { //si mode = -1 alors creation d'un n
 
         // Récupération du nom de la machine et du numéro de port pour affichage à l'écran
         *len=sizeof(struct sockaddr_storage);
-        ecode=getsockname(descSockRDV, (struct sockaddr *) &myinfo, len);
+        ecode=getsockname(sock, (struct sockaddr *) &myinfo, len);
         if (ecode == -1)
         {
             perror("SERVEUR: getsockname");
@@ -129,13 +139,13 @@ int gererSocket(int mode, socklen_t* len) { //si mode = -1 alors creation d'un n
         printf("Le port d'ecoute est: %s\n", serverPort);
 
         // Definition de la taille du tampon contenant les demandes de connexion
-        ecode = listen(descSockRDV, LISTENLEN);
+        ecode = listen(sock, LISTENLEN);
         if (ecode == -1) {
             perror("Erreur initialisation buffer d'écoute");
             exit(5);
         }
         *len = sizeof(struct sockaddr_storage);
-        return descSockRDV;
+        return sock;
     } else {
         close(mode);
     }
