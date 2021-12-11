@@ -12,9 +12,13 @@
 
 #define MAXBUFFERLEN 1024           // Taille du tampon pour les échanges de données
 #define MAXCLIENT 16 				// Nombre maximum de clients FTP
-#define TIMEOUT 5000 				//valeur du temps maximal que peut mettre un client en repondre (en ms)
+#define DEFAULT_TIMEOUT 500000 				//valeur du temps maximal que peut mettre un client en repondre (en ms) par defaut
 
 int nbrClients = 0; //variable globale indiquant le nombre de client en cours
+int descSockCOM; //variable globale indiquant le fd du client
+int descSockSERV; //variable globale indiquant le fd du serveur
+
+
 
 int regCompare(char* chaine, char *pattern) { //comparer 2 chaines par regex
     regex_t reg;
@@ -37,7 +41,7 @@ int regCompare(char* chaine, char *pattern) { //comparer 2 chaines par regex
         exit(EXIT_FAILURE);
     }
 
-}
+} 
 
 int chaineCommencePar(char* chaine, char* comparaison) {
     if (strlen(chaine) < strlen(comparaison))
@@ -58,15 +62,21 @@ void traitementSignal(int idSignal) {
 
 }
 
-int traiterSocket(int desc, char buffer[MAXBUFFERLEN]) {
+int traiterSocket(int desc, char buffer[MAXBUFFERLEN], int timeout) {
+	int t = 0; //t la valeur du temps maximal que peut mettre un client en repondre (en ms)
+	
+	if (timeout == -1) //si le parametre fournis est -1 alors la valeur du timeout est celle par default
+		 t = DEFAULT_TIMEOUT;
+	else 
+		 t = timeout;
     char bufferC[MAXBUFFERLEN] = {};
 
 	struct pollfd fd = {
         .fd = desc,
         .events = POLLIN
     };
-	int retourPoll = poll(&fd, 1, TIMEOUT); // ecoute pendant 5 secondes
-    if (retourPoll == 0) {
+	int retourPoll = poll(&fd, 1, t); // ecoute pendant t millisecondes
+    if (retourPoll == 0) { //si le client ne repond rien
 	   	puts("TIMEOUT...");
 	   	return 0;
 	 }
@@ -76,6 +86,7 @@ int traiterSocket(int desc, char buffer[MAXBUFFERLEN]) {
     if (len > 0) {
       len = read(desc, bufferC, len);
         if ( len <= 0 ) { //communication interrompu
+        	perror("read");
             return -1;
         }
     }
@@ -88,7 +99,16 @@ int traiterSocket(int desc, char buffer[MAXBUFFERLEN]) {
 	return 1;    
 }
 
-int ecouterClient(int descSockCOM, char* commande) {
+void echange(int desc1, int desc2, int time1, int time2) {
+	char buffer1[MAXBUFFERLEN] = {}; 
+	char buffer2[MAXBUFFERLEN] = {}; 
+	traiterSocket(desc1, buffer1, time1);
+	write(desc2, buffer1, strlen(buffer1));
+	traiterSocket(desc2, buffer2, time2);
+	write(desc1, buffer2, strlen(buffer2));
+}
+
+int ecouterClient(char* commande) {
     
     if (chaineCommencePar(commande, "AUTH")) {
         write(descSockCOM, "534\n", sizeof("534\n")); //ne supporte pas l'extension de securite (RFC 2228)
@@ -96,11 +116,12 @@ int ecouterClient(int descSockCOM, char* commande) {
 
     if(chaineCommencePar(commande, "USER ")) {
         if (regCompare(commande, "..*@..*"))  {//verifie si la chaine est sous la forme nomlogin@nomserveur
-            int descSockSERV;
-
-            /*DeBUG*/
-            strtok(commande, " ");
+        	/*PROCEDURE POUR LE LOGIN */
             int result;
+		    char bufferC[MAXBUFFERLEN] = {};
+		    char bufferS[MAXBUFFERLEN] = ""; //buffer pour envoyer le login
+		    
+            strtok(commande, " ");
             char* nomLogin = strtok(NULL, "@");
             char* nomServeur = strtok(NULL, "@");
             nomServeur[strlen(nomServeur)-2] = '\0'; //retire le saut de ligne
@@ -111,10 +132,28 @@ int ecouterClient(int descSockCOM, char* commande) {
             }
 
             printf("Desc : %d\n", descSockSERV);
-			char bufferC[MAXBUFFERLEN] = {};
-			traiterSocket(descSockSERV, bufferC);
+
+			traiterSocket(descSockSERV, bufferC, -1);
 			printf("Reponse serveur : %s\n", bufferC);
-            /* FIN CODE TEMPORAIRE */
+			
+			strcpy(bufferS, "USER ");
+			strncat(bufferS, nomLogin, sizeof(bufferS));
+			strcat(bufferS, "\n");			
+			printf("envoie login: %s", bufferS);
+			/* envoie du nom d'utilisateur au serveur ftp */
+			int len;
+			if((len = write(descSockSERV, bufferS, strlen(bufferS))) == -1)  //envoie le login au serveur
+				perror("write");
+			traiterSocket(descSockSERV, bufferC, -1); //le serveur repond si le login est accepte ou pas
+			
+			/*reception de la reponse du serv ftp */
+		    write(descSockCOM, bufferC, sizeof(bufferC)); //relais la reponse au client
+
+			/* le client envoie le mdp au serv */
+			echange(descSockCOM, descSockSERV, 180000, -1);
+			/*echange avec SYST*/
+			echange(descSockCOM, descSockSERV, 180000, -1);
+			// le client est log !
         } else {
             write(descSockCOM, "530\n", sizeof("530\n")); //code "login failed"
             //write(descSockCOM, "221\n", sizeof("221\n")); //code "GOODBYE"
@@ -124,7 +163,7 @@ int ecouterClient(int descSockCOM, char* commande) {
     return 0;
 }
 
-void traiterFils(int descSockCOM, int pidPere) {
+void traiterFils(int pidPere) {
     printf("[proxy] CLIENT %d CONNECTE\n", descSockCOM);
     int stop = 0;
     char buffer[MAXBUFFERLEN] = {};
@@ -134,7 +173,7 @@ void traiterFils(int descSockCOM, int pidPere) {
     write(descSockCOM, buffer, sizeof(buffer)); //envoie le bonjour 220
 	
     while (!stop) { //boucle principale
-    	int retourPoll = traiterSocket(descSockCOM, buffer);
+    	int retourPoll = traiterSocket(descSockCOM, buffer, -1);
     	printf("je lis %s\n", buffer);
         if (retourPoll == 0) { //si le client ne repond rien durant le laps de temps
             printf("[proxy] timeout client %d\n", descSockCOM);
@@ -146,13 +185,12 @@ void traiterFils(int descSockCOM, int pidPere) {
              }
              return;
         } else {
-              ecouterClient(descSockCOM, buffer); 
+              ecouterClient(buffer); 
         }
     }
 }
 
 int main() {
-    int descSockCOM;      // Descripteur de socket de communication
     socklen_t len;                   // Variable utilisée pour stocker les longueurs des structures de socket#
     struct sockaddr_storage from;    // Informations sur le client connecté
     int descSockRDV = gererSocket(-1, &len); //cree le socket du proxy
@@ -180,7 +218,7 @@ int main() {
                 printf("[proxy] Erreur lors de la creation du processus fils\n");
                 exit(EXIT_FAILURE);
             case 0: //on passe le relai au proc fils
-                traiterFils(descSockCOM, pidPere);
+                traiterFils(pidPere);
                 printf("[proxy] CLIENT %d DECONNECTE\n", descSockCOM);
                 close(descSockCOM);
                 exit(EXIT_SUCCESS);
