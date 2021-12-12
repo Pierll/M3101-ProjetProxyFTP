@@ -1,0 +1,24 @@
+argv: 28932
+Succes de la connexion sur ftp.fau.de sur le port 28932 (28932)
+drwxrwxr-x   5 ftpfau   ftpfau       4096 Dec 12 07:41 almalinux
+drwxr-sr-x  19 ftpfau   ftpfau       4096 Dec 12 00:12 aminet
+drwxr-xr-x 216 ftpfau   ftpfau       4096 Dec 12 09:03 apache
+drwxr-xr-x  17 ftpfau   ftpfau       4096 Dec 12 10:31 archlinux
+drwxr-xr-x  16 ftpfau   ftpfau       4096 Mar 26  2015 CCC
+drwxr-xr-x  11 ftpfau   ftpfau       4096 Apr 15  2021 cdn.media.ccc.de
+drwxrwxr-x  58 ftpfau   ftpfau       4096 Nov 16 12:47 centos
+drwxrwsr-x  10 ftpfau   ftpfau       4096 Dec 12 09:21 cran
+drwxr-xr-x  18 ftpfau   ftpfau       4096 Dec 12 09:02 ctan
+drwxrwsr-x   6 ftpfau   ftpfau       4096 Sep 13 18:38 cygwin
+drwxr-xr-x   9 ftpfau   ftpfau       4096 Dec 12 07:01 debian
+drwxrwsr-x   5 ftpfau   ftpfau       4096 Jul 26  2016 debian-backports
+drwxr-xr-x   6 ftpfau   ftpfau       4096 Oct  9 21:11 debian-cd
+drwxr-xr-x   6 ftpfau   ftpfau       4096 Feb  3  2021 deepin
+drwxr-xr-x  10 ftpfau   ftpfau       4096 Nov 23 06:36 deepin-cd
+drwxr-sr-x   7 ftpfau   ftpfau       4096 Sep  3  2020 devuan
+drwxr-xr-x   9 ftpfau   ftpfau       4096 Oct 17 13:30 devuan-cd
+drwxrwxr-x 345 ftpfau   ftpfau      12288 Dec  7 12:52 eclipse
+dr-xr-xr-x   4 ftpfau   ftpfau       4096 Nov 24 10:51 endlessos-images
+drwxrwsr-x  12 ftpfau   ftpfau       4096 Dec 12 10:24 epel
+drwxr-xr-x   4 ftpfau   ftpfau       4096 Aug 26  2019 fdroid
+drwxr-xr-x   4 ftpfau   ftpfau       4096 Dec  8 18:16 fedor

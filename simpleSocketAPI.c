@@ -13,7 +13,6 @@
 #define MAXPORTLEN 64               // Taille d'un numéro de port
 
 int connect2Server(const char *serverName, int port, int *descSock){
-
     int ecode;                     // Retour des fonctions
 	struct addrinfo *res,*resPtr;  // Résultat de la fonction getaddrinfo
 	struct addrinfo hints;		   // Structure pour contrôler getaddrinfo

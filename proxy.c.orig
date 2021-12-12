@@ -131,7 +131,7 @@ int traiterDataSocket(int desc, int desc2, char buffer[MAXBUFFERLEN], int timeou
         .events = POLLIN
     };
     int retourPoll = poll(&fd, 1, t); // ecoute pendant t millisecondes
-
+    
     if (retourPoll == 0) { //si le client ne repond rien
         printf("timeout ");
         if (desc == descSockCOM) {
@@ -148,22 +148,22 @@ int traiterDataSocket(int desc, int desc2, char buffer[MAXBUFFERLEN], int timeou
     int len = 0;
     ioctl(desc, FIONREAD, &len);
     while (1) {
-        if (len > 0) {
-            len = read(desc, bufferC, len);
-            if ( len <= 0 ) { //communication interrompu
-                perror("read");
-                return -1;
-            }
-        }
-        if (len <= 0) { //communication interrompu
-            puts("DECONNEXION DU CLIENT");
-            return -1;
-        }
-        if (strchr(bufferC, '\n') != NULL) puts("*** END TROUVE ***");
-        printf("%s", bufferC);
-        write(desc2, bufferC, strlen(bufferC));
-        memset(bufferC, 0, sizeof(bufferC)); //nettoie le buffer sinon residus de memoire
-    }
+	    if (len > 0) {
+	        len = read(desc, bufferC, len);
+	        if ( len <= 0 ) { //communication interrompu
+	            perror("read");
+	            return -1;
+	        }
+	    }
+	    if (len <= 0) { //communication interrompu
+	        puts("DECONNEXION DU CLIENT");
+	        return -1;
+	    }
+    	if (strchr(bufferC, '\n') != NULL) puts("*** END TROUVE ***");
+	    printf("%s", bufferC);
+	    write(desc2, bufferC, strlen(bufferC));
+	    memset(bufferC, 0, sizeof(bufferC)); //nettoie le buffer sinon residus de memoire
+	}
     //printf("reception: %s", bufferC);
     memset(buffer, 0, sizeof(bufferC)); //nettoie le buffer sinon residus de memoire
     strncpy(buffer, bufferC, strlen(bufferC));
@@ -247,36 +247,32 @@ int ecouterClient(char* commande) {
         char* p2 = strtok(NULL, ",");
         int portSND = atoi(p1)*256+atoi(p2); //calcul du port (voir doc ftp)
         printf("Port PORT: %d\n", portSND);
+
         write(descSockSERV, "EPSV\n", strlen("EPSV\n")); //demande le port du passif au serveur
         traiterSocket(descSockSERV, buf, -1);
         strtok(buf, "|");
         char* port = strtok(NULL, "|"); // le port du serveur passif
-        int portRCV = atoi(port);
-        printf("port EPSV: %d\n", portRCV);
-		write(descSockCOM, "200 PORT OK\n", strlen("200 PORT OK\n"));
-		//write(descSockCOM, "200 PORT OK\n", strlen("200 PORT OK\n"));
+        printf("port EPSV: %d\n", atoi(port));
 
-        traiterSocket(descSockCOM, buf, -1); // recoie commande (client)
-        printf("Le client repond\n");
-        if (chaineCommencePar(buf, "LIST")) {
-        	puts("Le client veut lister");
-        	printf("Connexion data serveur:%d...\n", portRCV);
-            connect2Server(serverName, portRCV, &descSockRCV); //connexion au port de donnees
-            write(descSockSERV, "LIST\n", strlen("LIST\n")); //LIST
-            traiterSocket(descSockSERV, buf, -1); //recoie 220 (serveur)
+		traiterSocket(descSockCOM, buf, -1); // recoie commande (client)
+		if (chaineCommencePar(buf, "LIST ")) {
+			        connect2Server(serverName, atoi(port), &descSockRCV); //connexion au port de donnees
+        write(descSockSERV, "LIST\n", strlen("LIST\n")); //LIST
+        traiterSocket(descSockSERV, buf, -1); //recoie 220 (serveur)
 
-			puts("Connexion data client...");
-            connect2Server("127.0.0.1", portSND, &descSockSND);
-            write(descSockCOM, "150 LISTING...\n", strlen("150 LISTING...\n"));
+		
+        connect2Server("127.0.0.1", portSND, &descSockSND);
+        write(descSockCOM, "200 PORT OK\n", strlen("200 PORT OK\n"));
+        write(descSockCOM, "150 LISTING...\n", strlen("150 LISTING...\n"));
 
-            traiterDataSocket(descSockRCV, descSockSND, bufl, -1); //echange la liste des fichiers
-            puts("Donnees recu");
-            write(descSockCOM, "226 OK\n", strlen("226 OK\n"));
-            traiterSocket(descSockSERV, buf, -1); //recoie 226 (serveur)
-            close(descSockSND); 
-            close(descSockRCV);
-            puts("FIN LIST");
-        }
+		traiterDataSocket(descSockRCV, descSockSND, bufl, -1);
+	    puts("Donnees recu");
+        write(descSockCOM, "226 OK\n", strlen("226 OK\n"));
+		close(descSockSND);
+		close(descSockRCV);
+		puts("FIN LIST");
+		return 0;
+		}
 
     } else {
         echange1C(descSockSERV, descSockCOM, -1, commande);
@@ -317,7 +313,7 @@ int main() {
     struct sockaddr_storage from;    // Informations sur le client connecté
     int descSockRDV = gererSocket(-1, &len, SERVPORT); //cree le socket du proxy
     int pidPere = getpid(); //pid du pere
-
+	
     signal(SIGUSR1, traitementSignal); //pour recevoir le signal SIGUSR1 du fils
 
     /*Programme principal*/
