@@ -117,57 +117,20 @@ int traiterSocket(int desc, char buffer[MAXBUFFERLEN], int timeout) {
     strncpy(buffer, bufferC, strlen(bufferC));
     return 1;
 }
-int traiterDataSocket(int desc, int desc2, char buffer[MAXBUFFERLEN], int timeout) {
-    int t = 0; //t la valeur du temps maximal que peut mettre un client en repondre (en ms)
 
-    if (timeout == -1) //si le parametre fournis est -1 alors la valeur du timeout est celle par default
-        t = DEFAULT_TIMEOUT;
-    else
-        t = timeout;
-    char bufferC[MAXBUFFERLEN] = {};
-
-    struct pollfd fd = {
-        .fd = desc,
-        .events = POLLIN
-    };
-    int retourPoll = poll(&fd, 1, t); // ecoute pendant t millisecondes
-
-    if (retourPoll == 0) { //si le client ne repond rien
-        printf("timeout ");
-        if (desc == descSockCOM) {
-            printf("client\n");
-        } else if (desc == descSockSERV) {
-            printf("serveur\n");
-        }  else {
-            printf("\n");
+void transfert(int desc1, int desc2) { //pour transferer un flux de donnees
+	int ecode;
+    char buffer[MAXBUFFERLEN-1];
+    do {                                                                    //
+        ecode=read(desc1, buffer, MAXBUFFERLEN-1);                //
+        if (ecode <= 0 ) {
+            break;   //SI plus rien a lire , on ferme la boucle while
         }
+        printf("%s",buffer);
+        write(desc2, buffer, strlen(buffer));
+        bzero(buffer, MAXBUFFERLEN -1 );
+    } while (ecode > 0 );
 
-        return 0;
-    }
-
-    int len = 0;
-    ioctl(desc, FIONREAD, &len);
-    while (1) {
-        if (len > 0) {
-            len = read(desc, bufferC, len);
-            if ( len <= 0 ) { //communication interrompu
-                perror("read");
-                return -1;
-            }
-        }
-        if (len <= 0) { //communication interrompu
-            puts("DECONNEXION DU CLIENT");
-            return -1;
-        }
-        if (strchr(bufferC, '\n') != NULL) puts("*** END TROUVE ***");
-        printf("%s", bufferC);
-        write(desc2, bufferC, strlen(bufferC));
-        memset(bufferC, 0, sizeof(bufferC)); //nettoie le buffer sinon residus de memoire
-    }
-    //printf("reception: %s", bufferC);
-    memset(buffer, 0, sizeof(bufferC)); //nettoie le buffer sinon residus de memoire
-    strncpy(buffer, bufferC, strlen(bufferC));
-    return 1;
 }
 
 void echange2C(int desc1, int desc2, int time1, int time2) { //echange en 2 fois
@@ -191,7 +154,7 @@ int ecouterClient(char* commande) {
     if (chaineCommencePar(commande, "AUTH ")) {
         write(descSockCOM, "534\n", strlen("534\n")); //ne supporte pas l'extension de securite (RFC 2228)
     } else if(chaineCommencePar(commande, "USER ")) {
-        if (regCompare(commande, "..*@..*"))  {//verifie si la chaine est sous la forme nomlogin@nomserveur
+        if (regCompare(commande, "..*@..*"))  {//verifie si la chaine est sous la forme nomlogin@nomserveur avec un regex
             /*PROCEDURE POUR LE LOGIN */
             int result;
             char bufferC[MAXBUFFERLEN] = {};
@@ -226,6 +189,7 @@ int ecouterClient(char* commande) {
             echange2C(descSockCOM, descSockSERV, 180000, -1);
             /*echange avec SYST*/
             echange2C(descSockCOM, descSockSERV, 180000, -1);
+            // traiterDataSocket(descSockSERV, descSockCOM, bufferC, -1);
             // le client est log !
         } else {
             puts("[proxy] echec du login !");
@@ -253,28 +217,32 @@ int ecouterClient(char* commande) {
         char* port = strtok(NULL, "|"); // le port du serveur passif
         int portRCV = atoi(port);
         printf("port EPSV: %d\n", portRCV);
-		write(descSockCOM, "200 PORT OK\n", strlen("200 PORT OK\n"));
-		//write(descSockCOM, "200 PORT OK\n", strlen("200 PORT OK\n"));
+        write(descSockCOM, "200 PORT OK\n", strlen("200 PORT OK\n"));
+        //write(descSockCOM, "200 PORT OK\n", strlen("200 PORT OK\n"));
 
         traiterSocket(descSockCOM, buf, -1); // recoie commande (client)
         printf("Le client repond\n");
         if (chaineCommencePar(buf, "LIST")) {
-        	puts("Le client veut lister");
-        	printf("Connexion data serveur:%d...\n", portRCV);
+            puts("Le client veut lister");
+            printf("Connexion data serveur:%d...\n", portRCV);
             connect2Server(serverName, portRCV, &descSockRCV); //connexion au port de donnees
             write(descSockSERV, "LIST\n", strlen("LIST\n")); //LIST
             traiterSocket(descSockSERV, buf, -1); //recoie 220 (serveur)
 
-			puts("Connexion data client...");
+            puts("Connexion data client...");
             connect2Server("127.0.0.1", portSND, &descSockSND);
             write(descSockCOM, "150 LISTING...\n", strlen("150 LISTING...\n"));
 
-            traiterDataSocket(descSockRCV, descSockSND, bufl, -1); //echange la liste des fichiers
+            transfert(descSockRCV, descSockSND);
             puts("Donnees recu");
-            write(descSockCOM, "226 OK\n", strlen("226 OK\n"));
-            traiterSocket(descSockSERV, buf, -1); //recoie 226 (serveur)
-            close(descSockSND); 
+
+			close(descSockSND);
             close(descSockRCV);
+
+            traiterSocket(descSockSERV, buf, -1); //recoie 226 (serveur)
+            write(descSockCOM, "226 OK\n", strlen("226 OK\n"));
+
+
             puts("FIN LIST");
         }
 
