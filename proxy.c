@@ -22,15 +22,14 @@ int pidPere; //variable globale indiquant le pid du pere
 char serverName[MAXBUFFERLEN];
 
 void fermeture() {
-    gererSocket(descSockCOM, NULL, 0); //on ferme le socket du client
-
+    close(descSockCOM);
     if (kill(pidPere, SIGUSR1) == -1) { //envoie le signal SIGUSR 1 au pere pour signaler sa fin
         perror("kill");
         exit(EXIT_FAILURE);
     }
 }
 
-int regCompare(char* chaine, char *pattern) { //comparer 2 chaines par regex
+int regCompare(char* chaine, char *pattern) { //comparer 1 chaines avec une expression reguliere
     regex_t reg;
     int r;
 
@@ -88,19 +87,11 @@ int traiterSocket(int desc, char buffer[MAXBUFFERLEN], int timeout) {
     int retourPoll = poll(&fd, 1, t); // ecoute pendant t millisecondes
     if (retourPoll == 0) { //si le client ne repond rien
         printf("timeout ");
-        if (desc == descSockCOM) {
-            printf("client\n");
-        } else if (desc == descSockSERV) {
-            printf("serveur\n");
-        }  else {
-            printf("\n");
-        }
-
         return 0;
     }
 
     int len = 0;
-    ioctl(desc, FIONREAD, &len);
+    ioctl(desc, FIONREAD, &len); //ETAT DU SOCKET
     if (len > 0) {
         len = read(desc, bufferC, len);
         if ( len <= 0 ) { //communication interrompu
@@ -119,17 +110,15 @@ int traiterSocket(int desc, char buffer[MAXBUFFERLEN], int timeout) {
 }
 
 void transfert(int desc1, int desc2) { //pour transferer un flux de donnees
-	int ecode;
     char buffer[MAXBUFFERLEN-1];
-    do {                                                                    //
-        ecode=read(desc1, buffer, MAXBUFFERLEN-1);                //
-        if (ecode <= 0 ) {
-            break;   //SI plus rien a lire , on ferme la boucle while
+    do {
+        if (read(desc1, buffer, MAXBUFFERLEN-1) <= 0 ) {
+            break;   //SI plus rien a lire on break la boucle while
         }
         printf("%s",buffer);
         write(desc2, buffer, strlen(buffer));
         bzero(buffer, MAXBUFFERLEN -1 );
-    } while (ecode > 0 );
+    } while (1);
 
 }
 
@@ -170,12 +159,11 @@ int ecouterClient(char* commande) {
                 return 1;
             }
             strncpy(serverName, nomServeur, strlen(nomServeur));
-            traiterSocket(descSockSERV, bufferC, -1);
+            traiterSocket(descSockSERV, bufferC, -1); //il nous envoie 220
 
             strcpy(bufferS, "USER ");
             strncat(bufferS, nomLogin, sizeof(bufferS));
-            strcat(bufferS, "\n");
-            printf("envoie login: %s", bufferS);
+            strcat(bufferS, "\n"); //CREE la chaine USER ""\n
             /* envoie du nom d'utilisateur au serveur ftp */
             int len;
             if((len = write(descSockSERV, bufferS, strlen(bufferS))) == -1)  //envoie le login au serveur
@@ -194,56 +182,41 @@ int ecouterClient(char* commande) {
         } else {
             puts("[proxy] echec du login !");
             write(descSockCOM, "530\n", strlen("530\n")); //code "login failed"
-            //write(descSockCOM, "221\n", strlen("221\n")); //code "GOODBYE"
+            write(descSockCOM, "221\n", strlen("221\n")); //code "GOODBYE"
             fermeture();
             exit(EXIT_SUCCESS);
         }
     } else if (chaineCommencePar(commande, "PORT ")) { //si le client veut initier une connexion passive
         char buf[MAXBUFFERLEN] = {};
-        char bufl[MAXBUFFERLEN] = {};
-        int descSockRCV;
-        int descSockSND;
-        strtok(commande, ",");
-        strtok(NULL, ",");
-        strtok(NULL, ",");
-        strtok(NULL, ",");
-        char* p1 = strtok(NULL, ",");
-        char* p2 = strtok(NULL, ",");
-        int portSND = atoi(p1)*256+atoi(p2); //calcul du port (voir doc ftp)
-        printf("Port PORT: %d\n", portSND);
+        int descSockRCV; //le socket que le serveur ouvre pour envoyer la liste des fichiers
+        int descSockSND; //le socket que le client ouvre pour recevoir la liste des fichiers
+        int tmp; //variable qui sert just a recevoir les donnees inutiles de sscanf
+        int p1, p2; //les ports de la commande PORT
+        int portSND, portRCV; //le port du client et le port du serveur
+        sscanf(commande, "PORT %d,%d,%d,%d,%d,%d", &tmp, &tmp, &tmp, &tmp, &p1, &p2);
+        portSND = p1*256+p2; //calcul du port (voir doc ftp)
+
         write(descSockSERV, "EPSV\n", strlen("EPSV\n")); //demande le port du passif au serveur
-        traiterSocket(descSockSERV, buf, -1);
-        strtok(buf, "|");
-        char* port = strtok(NULL, "|"); // le port du serveur passif
-        int portRCV = atoi(port);
-        printf("port EPSV: %d\n", portRCV);
-        write(descSockCOM, "200 PORT OK\n", strlen("200 PORT OK\n"));
-        //write(descSockCOM, "200 PORT OK\n", strlen("200 PORT OK\n"));
+        traiterSocket(descSockSERV, buf, -1); //recoie la reponse du serveur de EPSV
+        sscanf(buf, "229 Entering Extended Passive Mode (|||%d|)", &portRCV);
+
+        write(descSockCOM, "200 PORT OK\n", strlen("200 PORT OK\n")); //signale au client que sa demande PORT a ete accepte
 
         traiterSocket(descSockCOM, buf, -1); // recoie commande (client)
-        printf("Le client repond\n");
         if (chaineCommencePar(buf, "LIST")) {
-            puts("Le client veut lister");
-            printf("Connexion data serveur:%d...\n", portRCV);
             connect2Server(serverName, portRCV, &descSockRCV); //connexion au port de donnees
-            write(descSockSERV, "LIST\n", strlen("LIST\n")); //LIST
-            traiterSocket(descSockSERV, buf, -1); //recoie 220 (serveur)
+            write(descSockSERV, "LIST\n", strlen("LIST\n")); //demande au serveur d'envoyer les donnees
+            traiterSocket(descSockSERV, buf, -1); //recoie 220 bonjour (serveur)
 
-            puts("Connexion data client...");
-            connect2Server("127.0.0.1", portSND, &descSockSND);
-            write(descSockCOM, "150 LISTING...\n", strlen("150 LISTING...\n"));
+            connect2Server("127.0.0.1", portSND, &descSockSND); //se connecte au client pour envoyer les donnees
+            write(descSockCOM, "150 LISTING...\n", strlen("150 LISTING...\n")); //dit au client de se preparer a recevoir les donnees
 
             transfert(descSockRCV, descSockSND);
-            puts("Donnees recu");
-
-			close(descSockSND);
+            close(descSockSND);
             close(descSockRCV);
 
             traiterSocket(descSockSERV, buf, -1); //recoie 226 (serveur)
             write(descSockCOM, "226 OK\n", strlen("226 OK\n"));
-
-
-            puts("FIN LIST");
         }
 
     } else {
@@ -257,16 +230,14 @@ int ecouterClient(char* commande) {
 void traiterFils(int pidPere_p) {
     pidPere = pidPere_p;
     printf("[proxy] CLIENT %d CONNECTE\n", descSockCOM);
-    int stop = 0;
     char buffer[MAXBUFFERLEN] = {};
 
     char* strBonjour = "220 BIENVENUE SUR LE PROXY FTP\n";
     strncpy(buffer, strBonjour, MAXBUFFERLEN);
     write(descSockCOM, buffer, sizeof(buffer)); //envoie le bonjour 220
 
-    while (!stop) { //boucle principale
+    while (1) { //boucle principale
         int retourPoll = traiterSocket(descSockCOM, buffer, -1);
-        printf("je lis %s\n", buffer);
         if (retourPoll == 0) { //si le client ne repond rien durant le laps de temps
             printf("[proxy] timeout client %d\n", descSockCOM);
         } else if (retourPoll == -1) {
@@ -281,7 +252,7 @@ void traiterFils(int pidPere_p) {
 
 
 int main() {
-    socklen_t len;                   // Variable utilisée pour stocker les longueurs des structures de socket#
+    socklen_t len;                   // Variable utilisée pour stocker les longueurs des structures de socket
     struct sockaddr_storage from;    // Informations sur le client connecté
     int descSockRDV = gererSocket(-1, &len, SERVPORT); //cree le socket du proxy
     int pidPere = getpid(); //pid du pere
@@ -324,19 +295,3 @@ int main() {
     close(descSockCOM);
     gererSocket(descSockRDV, NULL, 0); //on ferme le socket de RDV
 }
-
-
-/*
-int main(int argc, char* argv[]) {
-    char buffer[MAXBUFFERLEN];
-    int descS, descN;
-    printf("argv: %s\n", argv[1]);
-    connect2Server("ftp.fau.de", atoi(argv[1]), &descS);
-    connect2Server("127.0.0.1", atoi(argv[2]), &descN);
-    //while (1) {
-    traiterDataSocket(descS, descN, buffer, -1);
-    //printf("%s", buffer);
-    //}
-    puts("FIN");
-    return 0;
-}*/

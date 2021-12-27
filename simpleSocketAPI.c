@@ -84,7 +84,6 @@ int gererSocket(int mode, socklen_t* len, int port) { //si mode = -1 alors creat
         struct sockaddr_storage myinfo;  // Informations sur la connexion de RDV
         // Initialisation de la socket de RDV IPv4/TCP
         sock = socket(AF_INET, SOCK_STREAM, 0);
-        printf("[debug] socket : %d\n", sock);
         if (sock == -1) {
             perror("Erreur création socket RDV\n");
             exit(2);
